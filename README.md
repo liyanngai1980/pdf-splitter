@@ -4,6 +4,8 @@ A fast, elegant, client-side web application for inspecting and splitting PDF do
 
 Runs **100% locally in your browser** — no files are uploaded to any server, guaranteeing privacy and data security.
 
+**Live Demo / GitHub Pages:** [https://liyanngai1980.github.io/pdf-splitter/](https://liyanngai1980.github.io/pdf-splitter/)
+
 ---
 
 ## 🌟 Key Features
@@ -38,7 +40,7 @@ Runs **100% locally in your browser** — no files are uploaded to any server, g
 
 ## 🚀 How to Launch & Use
 
-### Option 1: Open Directly in Browser (Recommended)
+### Option 1: Open Directly in Browser
 Double-click `open.command` or `index.html` in Finder, or run in terminal:
 ```bash
 open /Users/local/pdf-splitter/index.html
@@ -52,8 +54,17 @@ This opens `http://localhost:8085` in your default browser.
 
 ---
 
-## 🧪 Testing with Sample Documents
+## 🌐 Publishing to GitHub Pages
 
-Two sample multi-page PDFs are already generated in the directory for testing:
-- `sample_6_pages.pdf` (6-page test document)
-- `sample_12_pages.pdf` (12-page test document)
+1. Create a new public repository named `pdf-splitter` on your GitHub account:
+   [https://github.com/new?name=pdf-splitter](https://github.com/new?name=pdf-splitter)
+2. Push the committed code:
+   ```bash
+   cd /Users/local/pdf-splitter
+   ./push_to_github.sh
+   # or: git push -u origin main
+   ```
+3. Enable GitHub Pages in your repository settings:
+   - Go to **Settings** → **Pages**
+   - Under **Build and deployment**, select **Deploy from a branch** (`main` / `/ (root)`) or **GitHub Actions**
+   - The web tool will be live at: `https://liyanngai1980.github.io/pdf-splitter/`
