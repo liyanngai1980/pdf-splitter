@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Page Splitter — Fast & Secure Local PDF Split Tool</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Bundled local libraries for 100% offline & private processing -->
+  <script src="lib/pdf-lib.min.js"></script>
+  <script src="lib/pdf.min.js"></script>
+  <script src="lib/jszip.min.js"></script>
+</head>
+<body>
+
+  <!-- Top App Navigation Bar -->
+  <header class="app-header">
+    <div class="header-content">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="9" y1="15" x2="15" y2="15"></line>
+            <line x1="12" y1="12" x2="12" y2="18"></line>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">PDF Page Splitter</h1>
+          <span class="brand-badge">Client-Side Only</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="privacy-pill" title="All processing happens locally in your browser. Files never leave your device.">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span>100% Private & Offline</span>
+        </div>
+        <button id="themeToggleBtn" class="theme-btn" title="Toggle Light/Dark Theme" aria-label="Toggle Theme">
+          <span class="theme-icon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="app-container">
+
+    <!-- Step 1: Upload / Drop Zone -->
+    <section id="uploadSection" class="upload-section">
+      <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Upload PDF File">
+        <input type="file" id="pdfFileInput" accept="application/pdf" class="file-input">
+        
+        <div class="drop-zone-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
+            <path d="M12 12v9"></path>
+            <path d="m16 16-4-4-4 4"></path>
+          </svg>
+        </div>
+        <h2 class="drop-zone-title">Drop your PDF file here</h2>
+        <p class="drop-zone-subtitle">or <span class="browse-link">browse from your computer</span></p>
+        <div class="drop-zone-hint">
+          <span>✨ Reads total page count instantly</span>
+          <span>•</span>
+          <span>Supports large documents</span>
+          <span>•</span>
+          <span>No size limit</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2: Document Inspection & Page Count Header (hidden initially) -->
+    <section id="docInfoSection" class="doc-info-section" style="display: none;">
+      <div class="doc-card">
+        <div class="doc-meta-left">
+          <div class="doc-pdf-badge">PDF</div>
+          <div class="doc-details">
+            <h2 id="docFileName" class="doc-filename">document.pdf</h2>
+            <div class="doc-stats">
+              <span id="docFileSize" class="doc-stat-pill">0 KB</span>
+              <span id="docPageCountBadge" class="doc-stat-pill highlight">Reading pages...</span>
+              <span id="docPageDimensions" class="doc-stat-pill">A4 Portrait</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="doc-meta-right">
+          <button id="btnChangePdf" class="btn btn-secondary btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            Choose Another File
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3: Split Configuration & Mode Selection (hidden initially) -->
+    <section id="splitConfigSection" class="split-config-section" style="display: none;">
+      
+      <!-- Split Mode Tabs -->
+      <div class="mode-tabs-container">
+        <div class="mode-tabs-label">Split Method:</div>
+        <div class="mode-tabs">
+          <button class="mode-tab-btn active" data-mode="all">
+            <span class="tab-icon">📑</span>
+            <span class="tab-title">Split Every Page</span>
+            <span class="tab-desc">1 page per PDF</span>
+          </button>
+          <button class="mode-tab-btn" data-mode="ranges">
+            <span class="tab-icon">✂️</span>
+            <span class="tab-title">By Page Ranges</span>
+            <span class="tab-desc">Custom intervals</span>
+          </button>
+          <button class="mode-tab-btn" data-mode="chunks">
+            <span class="tab-icon">📦</span>
+            <span class="tab-title">Fixed Chunks</span>
+            <span class="tab-desc">Every N pages</span>
+          </button>
+          <button class="mode-tab-btn" data-mode="extract">
+            <span class="tab-icon">🎯</span>
+            <span class="tab-title">Extract Pages</span>
+            <span class="tab-desc">Pick selected</span>
+          </button>
+          <button class="mode-tab-btn" data-mode="delete">
+            <span class="tab-icon">🗑️</span>
+            <span class="tab-title">Remove Pages</span>
+            <span class="tab-desc">Delete unwanted</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Mode Specific Settings Cards -->
+      <div class="mode-settings-card">
+        
+        <!-- Setting Panel: Split Every Page -->
+        <div class="mode-panel active" id="panel-mode-all">
+          <div class="panel-desc-box">
+            <div class="panel-desc-title">📄 Split all pages into individual single-page PDF files</div>
+            <p class="panel-desc-text">
+              Each page of your <strong id="allPagesCountText">0-page</strong> document will become an independent PDF file. You can download each file individually or download everything in one organized ZIP archive.
+            </p>
+          </div>
+        </div>
+
+        <!-- Setting Panel: Custom Page Ranges -->
+        <div class="mode-panel" id="panel-mode-ranges">
+          <div class="panel-desc-box">
+            <div class="panel-desc-title">✂️ Define custom page intervals to split into separate documents</div>
+            <p class="panel-desc-text">
+              Enter page ranges separated by commas (e.g. <code>1-3, 4-6, 7-10</code> or <code>1, 3, 5-8</code>). Each specified range will produce a distinct PDF document.
+            </p>
+          </div>
+          <div class="range-input-group">
+            <label for="rangeInput" class="input-label">Page Ranges:</label>
+            <div class="input-with-button">
+              <input type="text" id="rangeInput" class="text-input" placeholder="e.g. 1-2, 3-5, 6-10">
+              <button id="btnAutoRanges" class="btn btn-secondary btn-sm" title="Split into equal halves or presets">Auto Suggest</button>
+            </div>
+            <div id="rangeValidationFeedback" class="range-feedback"></div>
+          </div>
+        </div>
+
+        <!-- Setting Panel: Fixed Chunks -->
+        <div class="mode-panel" id="panel-mode-chunks">
+          <div class="panel-desc-box">
+            <div class="panel-desc-title">📦 Split into consecutive blocks of N pages</div>
+            <p class="panel-desc-text">
+              Divide your document into equal parts of a fixed number of pages per file.
+            </p>
+          </div>
+          <div class="chunks-control-row">
+            <label for="chunkSizeInput" class="input-label">Pages per PDF file:</label>
+            <div class="stepper-wrap">
+              <button id="btnChunkDec" class="stepper-btn">-</button>
+              <input type="number" id="chunkSizeInput" class="stepper-input" min="1" max="100" value="2">
+              <button id="btnChunkInc" class="stepper-btn">+</button>
+            </div>
+            <div id="chunkEstimateText" class="chunk-estimate-badge">Will generate 0 files</div>
+          </div>
+        </div>
+
+        <!-- Setting Panel: Extract Selected Pages -->
+        <div class="mode-panel" id="panel-mode-extract">
+          <div class="panel-desc-box">
+            <div class="panel-desc-title">🎯 Extract only the pages you want from the visual grid below</div>
+            <p class="panel-desc-text">
+              Select or deselect pages using the thumbnail cards below or the quick selection buttons.
+            </p>
+          </div>
+          <div class="extract-options-row">
+            <label class="radio-label">
+              <input type="radio" name="extractFormat" value="merged" checked>
+              <span>Merge all selected pages into <strong>one single PDF</strong></span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="extractFormat" value="separate">
+              <span>Save each selected page as a <strong>separate individual PDF</strong></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Setting Panel: Delete Pages -->
+        <div class="mode-panel" id="panel-mode-delete">
+          <div class="panel-desc-box danger-box">
+            <div class="panel-desc-title">🗑️ Exclude/Delete selected pages from document</div>
+            <p class="panel-desc-text">
+              Check the pages you wish to remove in the grid below. The tool will generate a new PDF containing all remaining pages.
+            </p>
+          </div>
+        </div>
+
+        <!-- Output Filename Setting -->
+        <div class="naming-row">
+          <div class="naming-item">
+            <label for="namingPatternInput" class="input-label">Output File Naming Prefix:</label>
+            <input type="text" id="namingPatternInput" class="text-input" placeholder="split_document">
+          </div>
+          <div class="naming-preview-item">
+            <span class="preview-label">File Name Example:</span>
+            <code id="namingPreviewExample" class="name-example-code">split_document_page_1.pdf</code>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Visual Page Thumbnail Grid Toolbar & Controls -->
+      <div class="grid-toolbar">
+        <div class="grid-toolbar-left">
+          <span class="grid-title">Interactive Page Grid</span>
+          <span id="selectedCountBadge" class="selected-badge">0 / 0 pages selected</span>
+        </div>
+        <div class="grid-toolbar-actions">
+          <button id="btnSelectAll" class="btn btn-ghost btn-xs">Select All</button>
+          <button id="btnDeselectAll" class="btn btn-ghost btn-xs">Deselect All</button>
+          <button id="btnSelectOdd" class="btn btn-ghost btn-xs">Odd Pages</button>
+          <button id="btnSelectEven" class="btn btn-ghost btn-xs">Even Pages</button>
+          <button id="btnInvertSelection" class="btn btn-ghost btn-xs">Invert</button>
+        </div>
+      </div>
+
+      <!-- Thumbnails Grid Container -->
+      <div id="pagesGridContainer" class="pages-grid">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Primary Action Footer Bar -->
+      <div class="action-footer-bar">
+        <div class="action-summary">
+          <span id="actionSummaryText" class="action-summary-text">Ready to split PDF</span>
+        </div>
+        <div class="action-buttons">
+          <button id="btnExecuteSplit" class="btn btn-primary btn-lg">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="9" y1="15" x2="15" y2="15"></line>
+              <line x1="12" y1="12" x2="12" y2="18"></line>
+            </svg>
+            <span>Split PDF Now</span>
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Step 4: Results & Generated Files List Section (hidden initially) -->
+    <section id="resultsSection" class="results-section" style="display: none;">
+      <div class="results-card">
+        <div class="results-header">
+          <div class="results-title-group">
+            <div class="success-icon">✓</div>
+            <div>
+              <h2 class="results-title">PDF Successfully Split!</h2>
+              <div id="resultsSubtitle" class="results-subtitle">Generated 0 files ready for download</div>
+            </div>
+          </div>
+          <div class="results-top-actions">
+            <button id="btnDownloadZip" class="btn btn-primary btn-pulse">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download All as ZIP</span>
+            </button>
+            <button id="btnSplitAnother" class="btn btn-secondary">
+              Split Another Document
+            </button>
+          </div>
+        </div>
+
+        <!-- Generated Files List -->
+        <div class="generated-files-list" id="generatedFilesList">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Progress Modal Dialog -->
+  <div id="progressModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="progressModalTitle" class="modal-title">Splitting PDF Pages...</h3>
+      </div>
+      <div class="modal-body">
+        <div class="progress-bar-wrap">
+          <div id="progressBarFill" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+        <div class="progress-stats-row">
+          <span id="progressStepText">Initializing document engine...</span>
+          <span id="progressPercentText" class="progress-pct">0%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page Lightbox Preview Modal -->
+  <div id="previewModal" class="modal-backdrop" style="display: none;" onclick="if(event.target===this) closePreviewModal()">
+    <div class="preview-modal-dialog">
+      <div class="preview-modal-header">
+        <span id="previewModalTitle" class="preview-title">Page Preview</span>
+        <button class="modal-close-btn" onclick="closePreviewModal()">✕</button>
+      </div>
+      <div class="preview-modal-body" id="previewModalBody">
+        <canvas id="largePreviewCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
