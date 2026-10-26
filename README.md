@@ -14,7 +14,14 @@ Runs **100% locally in your browser** — no files are uploaded to any server, g
    - Immediately calculates and displays the **total page count** (e.g. `📄 12 Pages`) as soon as you drop or select a PDF file.
    - Shows document file size, dimensions (A4, Letter, Legal), and page orientation (Portrait / Landscape).
 
-2. **Visual Page Grid & Thumbnails**:
+2. **OCR & Text Extraction (Chinese & English) — Save to Local Drive**:
+   - **OCR / Save as TXT (`.txt`)**: Extracts text page-by-page and saves a clean UTF-8 `.txt` file with page headers and document metadata directly to your local drive.
+   - **OCR / Save as HTML (`.html`)**: Generates and downloads a standalone, responsive `.html` web document with interactive sidebar table of contents, character/word statistics, copy buttons, and print layout.
+   - **Chinese & English Recognition**: Supports Chinese Simplified (`chi_sim`), Chinese Traditional (`chi_tra`), English (`eng`), and bilingual detection.
+   - **Hybrid Intelligence**: Instant 0.01s extraction for digital text layers + high-res Tesseract Neural OCR for scanned pages.
+   - **Scope Selection**: Process all pages in document or only the selected pages from the visual grid.
+
+3. **Visual Page Grid & Thumbnails**:
    - Renders live interactive thumbnail previews for every page.
    - Page selection tools: "Select All", "Deselect All", "Odd Pages", "Even Pages", and "Invert Selection".
    - Zoom in on any page with full-resolution lightbox preview.

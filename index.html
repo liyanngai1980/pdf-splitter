@@ -9,6 +9,7 @@
   <script src="lib/pdf-lib.min.js"></script>
   <script src="lib/pdf.min.js"></script>
   <script src="lib/jszip.min.js"></script>
+  <script src="lib/tesseract.min.js"></script>
 </head>
 <body>
 
@@ -96,6 +97,66 @@
             </svg>
             Choose Another File
           </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2.5: OCR & Text Extraction Section (Chinese & English to TXT / HTML) -->
+    <section id="ocrSection" class="ocr-section" style="display: none;">
+      <div class="ocr-card">
+        <div class="ocr-card-header">
+          <div class="ocr-title-group">
+            <div class="ocr-icon">🔤</div>
+            <div>
+              <h2 class="ocr-title">OCR &amp; Text Extraction</h2>
+              <p class="ocr-subtitle">Recognize Chinese &amp; English text from document pages and save directly to your local drive</p>
+            </div>
+          </div>
+
+          <div class="ocr-controls-group">
+            <div class="ocr-control-item">
+              <label for="ocrLangSelect" class="ocr-label">Recognition Language:</label>
+              <select id="ocrLangSelect" class="select-input">
+                <option value="chi_sim+eng" selected>🇨🇳 🇺🇸 中英双语 (Chinese + English)</option>
+                <option value="chi_sim">🇨🇳 中文简体 (Chinese Simplified)</option>
+                <option value="chi_tra">🇭🇰/🇹🇼 中文繁體 (Chinese Traditional)</option>
+                <option value="eng">🇺🇸 English (eng)</option>
+              </select>
+            </div>
+            <div class="ocr-control-item">
+              <label for="ocrScopeSelect" class="ocr-label">Page Selection:</label>
+              <select id="ocrScopeSelect" class="select-input">
+                <option value="all" selected>All Pages in Document</option>
+                <option value="selected">Selected Pages in Grid</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="ocr-actions-row">
+          <div class="ocr-buttons-group">
+            <!-- Button 1: Save to TXT -->
+            <button id="btnOcrToTxt" class="btn btn-ocr btn-ocr-txt" title="Run OCR and save plain text (.txt) file to local drive">
+              <span class="ocr-btn-icon">📄</span>
+              <div class="ocr-btn-text">
+                <span class="ocr-btn-main">OCR / Save as TXT</span>
+                <span class="ocr-btn-sub">Export text to local drive (.txt)</span>
+              </div>
+            </button>
+
+            <!-- Button 2: Save to HTML -->
+            <button id="btnOcrToHtml" class="btn btn-ocr btn-ocr-html" title="Run OCR and save formatted web document (.html) to local drive">
+              <span class="ocr-btn-icon">🌐</span>
+              <div class="ocr-btn-text">
+                <span class="ocr-btn-main">OCR / Save as HTML</span>
+                <span class="ocr-btn-sub">Export formatted HTML to local drive (.html)</span>
+              </div>
+            </button>
+          </div>
+
+          <div class="ocr-status-caption" id="ocrStatusMsg">
+            <span>✨ Hybrid Engine: Instant extraction for digital text + OCR for scanned pages</span>
+          </div>
         </div>
       </div>
     </section>
@@ -331,6 +392,30 @@
       </div>
       <div class="preview-modal-body" id="previewModalBody">
         <canvas id="largePreviewCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- OCR Result Viewer Modal -->
+  <div id="ocrResultModal" class="modal-backdrop" style="display: none;" onclick="if(event.target===this) closeOcrResultModal()">
+    <div class="ocr-modal-dialog">
+      <div class="ocr-modal-header">
+        <div class="ocr-modal-title-group">
+          <span class="ocr-modal-badge" id="ocrModalFormatBadge">TXT</span>
+          <h3 id="ocrResultTitle" class="ocr-modal-title">OCR Text Result</h3>
+        </div>
+        <div class="ocr-modal-actions">
+          <button id="btnCopyOcrText" class="btn btn-secondary btn-sm" title="Copy text to clipboard">📋 Copy Text</button>
+          <button id="btnSaveOcrTxtModal" class="btn btn-secondary btn-sm">💾 Download TXT</button>
+          <button id="btnSaveOcrHtmlModal" class="btn btn-primary btn-sm">🌐 Download HTML</button>
+          <button class="modal-close-btn" onclick="closeOcrResultModal()">✕</button>
+        </div>
+      </div>
+      <div class="ocr-modal-body">
+        <div class="ocr-stats-summary" id="ocrStatsSummary">
+          <span>0 characters</span> • <span>0 pages processed</span>
+        </div>
+        <pre id="ocrResultPre" class="ocr-result-pre"></pre>
       </div>
     </div>
   </div>

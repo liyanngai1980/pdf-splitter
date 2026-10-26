@@ -66,6 +66,27 @@ const btnDownloadZip = document.getElementById('btnDownloadZip');
 const btnSplitAnother = document.getElementById('btnSplitAnother');
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 
+// OCR DOM Elements
+const ocrSection = document.getElementById('ocrSection');
+const btnOcrToTxt = document.getElementById('btnOcrToTxt');
+const btnOcrToHtml = document.getElementById('btnOcrToHtml');
+const ocrLangSelect = document.getElementById('ocrLangSelect');
+const ocrScopeSelect = document.getElementById('ocrScopeSelect');
+const ocrStatusMsg = document.getElementById('ocrStatusMsg');
+
+const ocrResultModal = document.getElementById('ocrResultModal');
+const ocrModalFormatBadge = document.getElementById('ocrModalFormatBadge');
+const ocrResultTitle = document.getElementById('ocrResultTitle');
+const ocrResultPre = document.getElementById('ocrResultPre');
+const ocrStatsSummary = document.getElementById('ocrStatsSummary');
+const btnCopyOcrText = document.getElementById('btnCopyOcrText');
+const btnSaveOcrTxtModal = document.getElementById('btnSaveOcrTxtModal');
+const btnSaveOcrHtmlModal = document.getElementById('btnSaveOcrHtmlModal');
+
+let lastExtractedPages = []; // [{ pageNum, text, method }]
+let lastFullTxtString = '';
+let lastFullHtmlString = '';
+
 /* =========================================================
    Initialization & Event Listeners
    ========================================================= */
@@ -75,6 +96,7 @@ function init() {
   setupModeTabs();
   setupSelectionControls();
   setupInputs();
+  setupOcrListeners();
 }
 
 function setupTheme() {
@@ -358,6 +380,7 @@ async function handleIncomingFile(file) {
     setTimeout(hideProgress, 300);
 
     // Reveal config & render grid
+    ocrSection.style.display = 'block';
     splitConfigSection.style.display = 'flex';
     resultsSection.style.display = 'none';
 
@@ -972,6 +995,504 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+/* =========================================================
+   OCR & Text Extraction Engine (Chinese & English)
+   ========================================================= */
+function setupOcrListeners() {
+  btnOcrToTxt.addEventListener('click', () => runOcrExtraction('txt'));
+  btnOcrToHtml.addEventListener('click', () => runOcrExtraction('html'));
+
+  btnCopyOcrText.addEventListener('click', () => {
+    if (!lastFullTxtString) return;
+    navigator.clipboard.writeText(lastFullTxtString).then(() => {
+      const orig = btnCopyOcrText.textContent;
+      btnCopyOcrText.textContent = '✅ Copied!';
+      setTimeout(() => btnCopyOcrText.textContent = orig, 2000);
+    }).catch(err => {
+      alert('Failed to copy to clipboard: ' + err);
+    });
+  });
+
+  btnSaveOcrTxtModal.addEventListener('click', () => {
+    if (!lastFullTxtString) return;
+    const base = getPrefix();
+    const blob = new Blob([lastFullTxtString], { type: 'text/plain;charset=utf-8' });
+    triggerBrowserDownload(blob, `${base}_ocr.txt`);
+  });
+
+  btnSaveOcrHtmlModal.addEventListener('click', () => {
+    if (!lastFullHtmlString) return;
+    const base = getPrefix();
+    const blob = new Blob([lastFullHtmlString], { type: 'text/html;charset=utf-8' });
+    triggerBrowserDownload(blob, `${base}_ocr.html`);
+  });
+}
+
+function closeOcrResultModal() {
+  ocrResultModal.style.display = 'none';
+}
+
+async function runOcrExtraction(format) {
+  if (!currentPdfJsDoc || totalPages <= 0) {
+    alert('Please upload a valid PDF file first.');
+    return;
+  }
+
+  // 1. Determine target pages
+  let targetIndices = [];
+  if (ocrScopeSelect.value === 'selected') {
+    targetIndices = Array.from(selectedPages).sort((a, b) => a - b);
+    if (targetIndices.length === 0) {
+      alert('No pages selected! Please select at least one page in the grid below, or choose "All Pages in Document".');
+      return;
+    }
+  } else {
+    for (let i = 0; i < totalPages; i++) targetIndices.push(i);
+  }
+
+  const langCode = ocrLangSelect.value;
+  const langLabel = ocrLangSelect.options[ocrLangSelect.selectedIndex].text;
+  const totalTasks = targetIndices.length;
+
+  showProgress('Starting Text Recognition / OCR...', 5, `Preparing to process ${totalTasks} ${totalTasks === 1 ? 'page' : 'pages'} (${langLabel})...`);
+
+  lastExtractedPages = [];
+
+  try {
+    for (let i = 0; i < totalTasks; i++) {
+      const pageIdx = targetIndices[i];
+      const pageNum = pageIdx + 1;
+      const progressBase = Math.round((i / totalTasks) * 90);
+      updateProgress(progressBase, `Extracting Page ${pageNum} (${i + 1} of ${totalTasks})...`);
+
+      const page = await currentPdfJsDoc.getPage(pageNum);
+
+      // Attempt A: Embedded Digital Text Extraction (fast, lossless)
+      let extractedText = '';
+      let method = 'Digital Text';
+
+      try {
+        const textContent = await page.getTextContent();
+        extractedText = formatDigitalText(textContent);
+      } catch (textErr) {
+        console.warn(`TextContent error on page ${pageNum}:`, textErr);
+      }
+
+      // Check density of extracted text
+      const cleanLen = extractedText.replace(/\s+/g, '').length;
+
+      // Attempt B: If page has virtually no digital text (e.g. scanned image), invoke Tesseract OCR
+      if (cleanLen < 12) {
+        method = 'OCR';
+        updateProgress(progressBase + 2, `Page ${pageNum}: Scanned image detected. Rendering high-res image for OCR...`);
+
+        // Render page to high-res canvas (scale 2.0 ensures crisp Chinese & English glyph recognition)
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        if (window.Tesseract) {
+          updateProgress(progressBase + 4, `Page ${pageNum}: Running OCR engine (${langCode})...`);
+          try {
+            const ocrResult = await Tesseract.recognize(canvas, langCode, {
+              logger: m => {
+                if (m.status === 'recognizing text') {
+                  const subPct = Math.round((m.progress || 0) * 100);
+                  const displayPct = progressBase + Math.round((subPct / totalTasks) * 0.9);
+                  updateProgress(Math.min(95, displayPct), `Page ${pageNum}: Recognizing ${subPct}%...`);
+                }
+              }
+            });
+            if (ocrResult && ocrResult.data && ocrResult.data.text) {
+              extractedText = ocrResult.data.text.trim();
+            }
+          } catch (tessErr) {
+            console.error(`Tesseract OCR error on page ${pageNum}:`, tessErr);
+            extractedText = `[OCR error on page ${pageNum}: ${tessErr.message || tessErr}]`;
+          }
+        } else {
+          extractedText = `[Page ${pageNum}: Scanned image. Tesseract OCR library not ready.]`;
+        }
+      }
+
+      lastExtractedPages.push({
+        pageNum: pageNum,
+        text: extractedText.trim() || `(Page ${pageNum} contains no text)`,
+        method: method
+      });
+
+      // Small delay to allow UI to breathe
+      await new Promise(r => setTimeout(r, 10));
+    }
+
+    updateProgress(96, 'Building output documents...');
+
+    // 2. Build TXT and HTML representations
+    const baseName = getPrefix();
+    lastFullTxtString = buildTxtReport(lastExtractedPages, currentFile.name, langLabel);
+    lastFullHtmlString = buildHtmlReport(lastExtractedPages, currentFile.name, langLabel);
+
+    updateProgress(100, 'Done! Saving to local drive...');
+
+    setTimeout(() => {
+      hideProgress();
+
+      // Trigger automatic save to local drive
+      if (format === 'txt') {
+        const txtBlob = new Blob([lastFullTxtString], { type: 'text/plain;charset=utf-8' });
+        triggerBrowserDownload(txtBlob, `${baseName}_ocr.txt`);
+      } else {
+        const htmlBlob = new Blob([lastFullHtmlString], { type: 'text/html;charset=utf-8' });
+        triggerBrowserDownload(htmlBlob, `${baseName}_ocr.html`);
+      }
+
+      // Show Result Modal
+      openOcrResultModal(format);
+
+    }, 350);
+
+  } catch (err) {
+    console.error('OCR Extraction error:', err);
+    hideProgress();
+    alert('OCR extraction failed: ' + (err.message || err));
+  }
+}
+
+/**
+ * Reconstructs natural lines and paragraphs from PDF.js textContent.
+ * Carefully handles Chinese character flow and English word spacing.
+ */
+function formatDigitalText(textContent) {
+  if (!textContent || !textContent.items || textContent.items.length === 0) return '';
+
+  const items = textContent.items;
+  const lines = [];
+  let currentLine = [];
+  let lastY = null;
+
+  // Group items by vertical line position
+  for (const item of items) {
+    if (!item.str && item.str !== ' ') continue;
+
+    // y is transform[5]
+    const y = item.transform ? Math.round(item.transform[5]) : 0;
+    const x = item.transform ? Math.round(item.transform[4]) : 0;
+
+    if (lastY === null || Math.abs(y - lastY) > 3) {
+      if (currentLine.length > 0) {
+        lines.push(currentLine);
+      }
+      currentLine = [];
+      lastY = y;
+    }
+
+    currentLine.push({ x: x, text: item.str });
+  }
+
+  if (currentLine.length > 0) {
+    lines.push(currentLine);
+  }
+
+  // Sort each line horizontally and build line string
+  const outputLines = [];
+  for (const line of lines) {
+    line.sort((a, b) => a.x - b.x);
+
+    let lineStr = '';
+    for (let i = 0; i < line.length; i++) {
+      const piece = line[i].text;
+      if (i > 0) {
+        const prevPiece = line[i - 1].text;
+        const prevLastChar = prevPiece.slice(-1);
+        const currFirstChar = piece.slice(0, 1);
+
+        // If English/Number -> English/Number, ensure space
+        const isPrevAlnum = /[a-zA-Z0-9.,;:!?]/.test(prevLastChar);
+        const isCurrAlnum = /[a-zA-Z0-9]/.test(currFirstChar);
+
+        if (isPrevAlnum && isCurrAlnum && !prevPiece.endsWith(' ') && !piece.startsWith(' ')) {
+          lineStr += ' ';
+        }
+      }
+      lineStr += piece;
+    }
+
+    if (lineStr.trim()) {
+      outputLines.push(lineStr.trim());
+    }
+  }
+
+  return outputLines.join('\n');
+}
+
+/**
+ * Builds clean UTF-8 plain text report
+ */
+function buildTxtReport(pagesData, fileName, langLabel) {
+  const divider = '='.repeat(80);
+  const now = new Date().toLocaleString();
+  const totalChars = pagesData.reduce((acc, p) => acc + p.text.length, 0);
+
+  let out = `${divider}\n`;
+  out += `DOCUMENT OCR & TEXT EXTRACTION REPORT\n`;
+  out += `Source File: ${fileName}\n`;
+  out += `Total Pages Processed: ${pagesData.length}\n`;
+  out += `Total Characters: ${totalChars.toLocaleString()}\n`;
+  out += `Recognition Language: ${langLabel}\n`;
+  out += `Exported Date: ${now}\n`;
+  out += `${divider}\n\n`;
+
+  pagesData.forEach(p => {
+    out += `--- PAGE ${p.pageNum} (Method: ${p.method}) ---\n\n`;
+    out += `${p.text}\n\n`;
+  });
+
+  out += `${divider}\n`;
+  out += `END OF DOCUMENT\n`;
+  out += `${divider}\n`;
+
+  return out;
+}
+
+/**
+ * Builds rich, responsive standalone HTML report with navigation TOC and clean typography
+ */
+function buildHtmlReport(pagesData, fileName, langLabel) {
+  const now = new Date().toLocaleString();
+  const totalChars = pagesData.reduce((acc, p) => acc + p.text.length, 0);
+  const totalWords = pagesData.reduce((acc, p) => acc + (p.text.match(/\b\w+\b/g) || []).length, 0);
+
+  // Generate page cards HTML
+  const pagesHtml = pagesData.map(p => `
+    <article class="page-section" id="page-${p.pageNum}">
+      <header class="page-header">
+        <div class="page-header-left">
+          <span class="page-badge">Page ${p.pageNum}</span>
+          <span class="method-tag">${escapeHtml(p.method)}</span>
+        </div>
+        <button class="copy-page-btn" onclick="navigator.clipboard.writeText(document.getElementById('content-${p.pageNum}').innerText).then(()=>alert('Page ${p.pageNum} copied!'))">📋 Copy Page</button>
+      </header>
+      <div class="page-body" id="content-${p.pageNum}">
+        ${p.text.split('\n').map(l => `<p>${escapeHtml(l) || '&nbsp;'}</p>`).join('')}
+      </div>
+    </article>
+  `).join('');
+
+  // Table of Contents links
+  const tocLinks = pagesData.map(p => `
+    <a href="#page-${p.pageNum}" class="toc-link">Page ${p.pageNum}</a>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(fileName)} — OCR & Extracted Text</title>
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --card-bg: #ffffff;
+      --card-border: #e5e5ea;
+      --text: #1d1d1f;
+      --text-muted: #86868b;
+      --primary: #0071e3;
+      --primary-light: #edf5fe;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121214;
+        --card-bg: #1c1c1e;
+        --card-border: rgba(255,255,255,0.12);
+        --text: #f5f5f7;
+        --text-muted: #98989d;
+        --primary: #2997ff;
+        --primary-light: rgba(41,151,255,0.15);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 30px 20px;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    .doc-banner {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 24px 28px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+    }
+    .doc-title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+    .doc-stats-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .stat-chip {
+      background: var(--primary-light);
+      color: var(--primary);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .toc-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 12px 16px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      margin-bottom: 24px;
+      align-items: center;
+    }
+    .toc-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-right: 6px;
+    }
+    .toc-link {
+      font-size: 12px;
+      color: var(--primary);
+      text-decoration: none;
+      padding: 3px 8px;
+      background: var(--bg);
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .toc-link:hover {
+      background: var(--primary);
+      color: #fff;
+    }
+    .page-section {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 16px;
+    }
+    .page-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .page-badge {
+      font-size: 13px;
+      font-weight: 800;
+      background: var(--primary);
+      color: #fff;
+      padding: 2px 10px;
+      border-radius: 6px;
+    }
+    .method-tag {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .copy-page-btn {
+      background: var(--bg);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .copy-page-btn:hover {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+    .page-body {
+      font-size: 15px;
+      color: var(--text);
+      line-height: 1.8;
+      word-break: break-word;
+    }
+    .page-body p {
+      margin-bottom: 10px;
+    }
+    .page-body p:last-child {
+      margin-bottom: 0;
+    }
+    @media print {
+      body { background: #fff; color: #000; padding: 0; }
+      .toc-bar, .copy-page-btn { display: none; }
+      .page-section { border: none; box-shadow: none; page-break-after: always; padding: 20px 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="doc-banner">
+      <h1 class="doc-title">📄 ${escapeHtml(fileName)}</h1>
+      <p style="font-size:13px; color:var(--text-muted);">OCR / Text Recognition Export • Generated on ${now}</p>
+      <div class="doc-stats-grid">
+        <span class="stat-chip">${pagesData.length} Pages</span>
+        <span class="stat-chip">${totalChars.toLocaleString()} Characters</span>
+        <span class="stat-chip">${totalWords.toLocaleString()} Words</span>
+        <span class="stat-chip">${escapeHtml(langLabel)}</span>
+      </div>
+    </div>
+
+    <nav class="toc-bar">
+      <span class="toc-label">Jump to page:</span>
+      ${tocLinks}
+    </nav>
+
+    <main>
+      ${pagesHtml}
+    </main>
+  </div>
+</body>
+</html>`;
+}
+
+function openOcrResultModal(format) {
+  ocrModalFormatBadge.textContent = format.toUpperCase();
+  ocrResultTitle.textContent = `OCR Text Export (${format.toUpperCase()}) — Saved to Local Drive`;
+
+  const totalChars = lastExtractedPages.reduce((acc, p) => acc + p.text.length, 0);
+  ocrStatsSummary.innerHTML = `
+    <strong>${lastExtractedPages.length} pages processed</strong> • 
+    <strong>${totalChars.toLocaleString()} characters</strong> • 
+    Saved to downloads folder
+  `;
+
+  ocrResultPre.textContent = lastFullTxtString;
+  ocrResultModal.style.display = 'flex';
 }
 
 // Kickoff
