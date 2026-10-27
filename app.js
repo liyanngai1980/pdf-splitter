@@ -22,6 +22,14 @@ let generatedFiles = []; // { filename, bytes, pageIndices, pageLabel }
 const dropZone = document.getElementById('dropZone');
 const pdfFileInput = document.getElementById('pdfFileInput');
 const uploadSection = document.getElementById('uploadSection');
+const uploadProgressCard = document.getElementById('uploadProgressCard');
+const uploadFileNameText = document.getElementById('uploadFileNameText');
+const uploadFileMetaText = document.getElementById('uploadFileMetaText');
+const uploadPercentBadge = document.getElementById('uploadPercentBadge');
+const uploadBarFill = document.getElementById('uploadBarFill');
+const uploadStatusMessage = document.getElementById('uploadStatusMessage');
+const uploadBytesRatio = document.getElementById('uploadBytesRatio');
+
 const docInfoSection = document.getElementById('docInfoSection');
 const splitConfigSection = document.getElementById('splitConfigSection');
 const resultsSection = document.getElementById('resultsSection');
@@ -118,8 +126,13 @@ function updateThemeIcon(theme) {
 }
 
 function setupDragAndDrop() {
-  // Click drop zone
-  dropZone.addEventListener('click', () => pdfFileInput.click());
+  // Click drop zone safely without recursive bubbling
+  dropZone.addEventListener('click', (e) => {
+    if (e.target !== pdfFileInput) {
+      pdfFileInput.click();
+    }
+  });
+
   dropZone.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -168,12 +181,19 @@ function setupDragAndDrop() {
 
   btnChangePdf.addEventListener('click', () => {
     pdfFileInput.value = '';
+    dropZone.style.display = 'block';
+    if (uploadProgressCard) uploadProgressCard.style.display = 'none';
+    docInfoSection.style.display = 'none';
+    splitConfigSection.style.display = 'none';
+    ocrSection.style.display = 'none';
+    resultsSection.style.display = 'none';
     pdfFileInput.click();
   });
 
   btnSplitAnother.addEventListener('click', () => {
     resultsSection.style.display = 'none';
     splitConfigSection.style.display = 'flex';
+    ocrSection.style.display = 'block';
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 }
@@ -301,45 +321,111 @@ function setupInputs() {
 }
 
 /* =========================================================
-   Step 2: PDF File Ingestion & Page Count Reading
+   Step 2: PDF File Ingestion & Page Count Reading with Upload Progress
    ========================================================= */
+function setUploadProgress(percent, message, ratio) {
+  if (uploadProgressCard) uploadProgressCard.style.display = 'flex';
+  if (uploadBarFill) uploadBarFill.style.width = `${percent}%`;
+  if (uploadPercentBadge) uploadPercentBadge.textContent = `${percent}%`;
+  if (uploadStatusMessage && message) uploadStatusMessage.textContent = message;
+  if (uploadBytesRatio && ratio) uploadBytesRatio.textContent = ratio;
+}
+
+function readFileWithProgress(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        const percent = Math.min(65, Math.round((e.loaded / e.total) * 65));
+        const loadedStr = formatBytes(e.loaded);
+        const totalStr = formatBytes(e.total);
+        setUploadProgress(
+          percent,
+          `Uploading & reading file: ${Math.round((e.loaded / e.total) * 100)}%...`,
+          `${loadedStr} / ${totalStr}`
+        );
+      }
+    };
+
+    reader.onload = () => {
+      setUploadProgress(70, 'File loaded. Parsing PDF structure...', formatBytes(file.size));
+      resolve(reader.result);
+    };
+
+    reader.onerror = () => {
+      reject(new Error('Failed to read file from storage: ' + (reader.error?.message || 'Unknown read error')));
+    };
+
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 async function handleIncomingFile(file) {
   if (!file) return;
   currentFile = file;
 
-  // Show reading progress
-  docInfoSection.style.display = 'block';
-  docFileName.textContent = file.name;
-  docFileSize.textContent = formatBytes(file.size);
-  docPageCountBadge.textContent = 'Analyzing pages...';
-  docPageDimensions.textContent = 'Reading...';
+  // Swap drop zone with the animated upload progress card
+  dropZone.style.display = 'none';
+  docInfoSection.style.display = 'none';
+  splitConfigSection.style.display = 'none';
+  ocrSection.style.display = 'none';
+  resultsSection.style.display = 'none';
+
+  uploadFileNameText.textContent = file.name;
+  uploadFileMetaText.textContent = `${formatBytes(file.size)} • PDF Document`;
+  setUploadProgress(5, 'Reading file into memory...', `0 B / ${formatBytes(file.size)}`);
 
   // Base naming prefix from file name
   const baseName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
   namingPatternInput.value = baseName;
 
-  showProgress('Reading PDF Document', 15, 'Loading file bytes into memory...');
-
   try {
-    currentArrayBuffer = await file.arrayBuffer();
+    // 1. Read file with live progress percentage
+    currentArrayBuffer = await readFileWithProgress(file);
 
-    // 1. Read with PDF-Lib (for fast page count & manipulation)
-    updateProgress(40, 'Reading PDF structure & page count...');
-    currentPdfDoc = await PDFLib.PDFDocument.load(currentArrayBuffer, { ignoreEncryption: true });
+    // 2. Read with PDF-Lib (for fast page count & manipulation)
+    setUploadProgress(75, 'Analyzing PDF pages & structure...', formatBytes(file.size));
     
-    // Exact requirement: read number of pages of the file!
-    totalPages = currentPdfDoc.getPageCount();
+    try {
+      currentPdfDoc = await PDFLib.PDFDocument.load(currentArrayBuffer, { ignoreEncryption: true });
+      // Exact requirement: read number of pages of the file!
+      totalPages = currentPdfDoc.getPageCount();
+    } catch (pdfLibErr) {
+      console.warn('PDF-Lib parser error, falling back to PDF.js engine:', pdfLibErr);
+      if (window.pdfjsLib) {
+        const fallbackTask = pdfjsLib.getDocument({
+          data: currentArrayBuffer.slice(0),
+          disableAutoFetch: true,
+          disableStream: true
+        });
+        currentPdfJsDoc = await fallbackTask.promise;
+        totalPages = currentPdfJsDoc.numPages;
+      } else {
+        throw pdfLibErr;
+      }
+    }
 
-    // 2. Read dimensions of first page
-    if (totalPages > 0) {
-      const firstPage = currentPdfDoc.getPage(0);
-      const { width, height } = firstPage.getSize();
-      const isLandscape = width > height;
-      const dimName = getStandardPageFormat(width, height);
-      docPageDimensions.textContent = `${dimName} (${Math.round(width)} × ${Math.round(height)} pt) ${isLandscape ? 'Landscape' : 'Portrait'}`;
+    setUploadProgress(85, `Reading metadata: ${totalPages} pages found...`, formatBytes(file.size));
+
+    // 3. Read dimensions of first page
+    if (currentPdfDoc && totalPages > 0) {
+      try {
+        const firstPage = currentPdfDoc.getPage(0);
+        const { width, height } = firstPage.getSize();
+        const isLandscape = width > height;
+        const dimName = getStandardPageFormat(width, height);
+        docPageDimensions.textContent = `${dimName} (${Math.round(width)} × ${Math.round(height)} pt) ${isLandscape ? 'Landscape' : 'Portrait'}`;
+      } catch (e) {
+        docPageDimensions.textContent = 'Standard PDF';
+      }
+    } else {
+      docPageDimensions.textContent = 'Standard PDF';
     }
 
     // Update Header Badges
+    docFileName.textContent = file.name;
+    docFileSize.textContent = formatBytes(file.size);
     docPageCountBadge.textContent = `📄 ${totalPages} ${totalPages === 1 ? 'Page' : 'Pages'}`;
     allPagesCountText.textContent = `${totalPages}-page`;
 
@@ -360,9 +446,9 @@ async function handleIncomingFile(file) {
     }
     validateRangeInput();
 
-    // 3. Load with PDF.js for rendering visual thumbnails
-    updateProgress(70, 'Rendering visual page previews...');
-    if (window.pdfjsLib) {
+    // 4. Load with PDF.js for rendering visual thumbnails
+    setUploadProgress(92, 'Generating page preview thumbnails...', formatBytes(file.size));
+    if (window.pdfjsLib && !currentPdfJsDoc) {
       try {
         const loadingTask = pdfjsLib.getDocument({
           data: currentArrayBuffer.slice(0),
@@ -371,27 +457,30 @@ async function handleIncomingFile(file) {
         });
         currentPdfJsDoc = await loadingTask.promise;
       } catch (workerErr) {
-        console.warn('PDF.js worker error or file:// restriction, falling back to clean page card layout:', workerErr);
+        console.warn('PDF.js thumbnail setup error:', workerErr);
         currentPdfJsDoc = null;
       }
     }
 
-    updateProgress(100, 'Ready!');
-    setTimeout(hideProgress, 300);
+    setUploadProgress(100, `Complete! Successfully loaded ${totalPages} pages.`, formatBytes(file.size));
 
-    // Reveal config & render grid
-    ocrSection.style.display = 'block';
-    splitConfigSection.style.display = 'flex';
-    resultsSection.style.display = 'none';
+    // Smooth transition to document workspace
+    setTimeout(() => {
+      uploadProgressCard.style.display = 'none';
+      docInfoSection.style.display = 'block';
+      ocrSection.style.display = 'block';
+      splitConfigSection.style.display = 'flex';
+      resultsSection.style.display = 'none';
 
-    renderPagesGrid();
-    updateActionSummary();
-    updateNamingPreview();
+      renderPagesGrid();
+      updateActionSummary();
+      updateNamingPreview();
+    }, 400);
 
   } catch (err) {
     console.error('PDF parsing error:', err);
-    hideProgress();
-    docPageCountBadge.textContent = 'Error parsing PDF';
+    uploadProgressCard.style.display = 'none';
+    dropZone.style.display = 'block';
     alert('Failed to read PDF document: ' + (err.message || 'The file may be password protected or corrupted.'));
   }
 }

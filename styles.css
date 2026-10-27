@@ -285,6 +285,107 @@ body {
   flex-wrap: wrap;
 }
 
+/* Uploading Percentage Progress Card */
+.upload-progress-card {
+  background-color: var(--bg-card);
+  border: 2px solid var(--primary);
+  border-radius: var(--radius-lg);
+  padding: 24px 28px;
+  box-shadow: 0 8px 24px rgba(0, 113, 227, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.25s ease;
+}
+
+.upload-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.upload-file-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.upload-pdf-icon {
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, #ff3b30, #ff9500);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 22px;
+  box-shadow: 0 4px 10px rgba(255, 59, 48, 0.25);
+}
+
+.upload-name-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.upload-filename {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  word-break: break-all;
+}
+
+.upload-filemeta {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.upload-percent-badge {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-bar-track {
+  width: 100%;
+  height: 12px;
+  background-color: var(--bg-hover);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+  border: 1px solid var(--border-subtle);
+}
+
+.upload-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0071e3, #5856d6, #34c759);
+  border-radius: var(--radius-full);
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 10px rgba(0, 113, 227, 0.4);
+}
+
+.upload-status-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.upload-status-message {
+  font-weight: 600;
+}
+
+.upload-bytes-ratio {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* =========================================================
    Step 2: Document Info Card
    ========================================================= */

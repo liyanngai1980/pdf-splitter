@@ -71,6 +71,29 @@
           <span>No size limit</span>
         </div>
       </div>
+
+      <!-- Uploading / Reading Percentage Progress Card -->
+      <div id="uploadProgressCard" class="upload-progress-card" style="display: none;">
+        <div class="upload-progress-header">
+          <div class="upload-file-info">
+            <span class="upload-pdf-icon">📄</span>
+            <div class="upload-name-group">
+              <div id="uploadFileNameText" class="upload-filename">document.pdf</div>
+              <div id="uploadFileMetaText" class="upload-filemeta">Reading file from storage...</div>
+            </div>
+          </div>
+          <div id="uploadPercentBadge" class="upload-percent-badge">0%</div>
+        </div>
+
+        <div class="upload-bar-track">
+          <div id="uploadBarFill" class="upload-bar-fill" style="width: 0%;"></div>
+        </div>
+
+        <div class="upload-status-footer">
+          <span id="uploadStatusMessage" class="upload-status-message">Uploading &amp; reading file...</span>
+          <span id="uploadBytesRatio" class="upload-bytes-ratio">0 MB / 0 MB</span>
+        </div>
+      </div>
     </section>
 
     <!-- Step 2: Document Inspection & Page Count Header (hidden initially) -->
