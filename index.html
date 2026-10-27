@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDF Page Splitter — Fast & Secure Local PDF Split Tool</title>
   <link rel="stylesheet" href="styles.css">
-  <!-- Bundled local libraries for 100% offline & private processing -->
+  <!-- Bundled local libraries with automatic CDN fallback -->
   <script src="lib/pdf-lib.min.js"></script>
+  <script>if(!window.PDFLib) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"><\/script>');</script>
   <script src="lib/pdf.min.js"></script>
+  <script>if(!window.pdfjsLib) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"><\/script>');</script>
   <script src="lib/jszip.min.js"></script>
+  <script>if(!window.JSZip) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"><\/script>');</script>
   <script src="lib/tesseract.min.js"></script>
+  <script>if(!window.Tesseract) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"><\/script>');</script>
 </head>
 <body>
 

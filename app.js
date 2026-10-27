@@ -1,11 +1,17 @@
 /**
  * PDF Page Splitter — Application Logic
- * Pure client-side PDF inspection, page count reading, splitting, and ZIP packaging.
+ * Pure client-side PDF inspection, page count reading, splitting, OCR, and ZIP packaging.
  */
 
-// Configure PDF.js worker
+// Configure PDF.js worker with fallback
 if (window.pdfjsLib) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+  try {
+    if (window.location.hostname.includes('github.io')) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    } else {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+    }
+  } catch(e) {}
 }
 
 // State
@@ -388,16 +394,15 @@ async function handleIncomingFile(file) {
     setUploadProgress(75, 'Analyzing PDF pages & structure...', formatBytes(file.size));
     
     try {
-      currentPdfDoc = await PDFLib.PDFDocument.load(currentArrayBuffer, { ignoreEncryption: true });
+      const uint8 = new Uint8Array(currentArrayBuffer);
+      currentPdfDoc = await PDFLib.PDFDocument.load(uint8, { ignoreEncryption: true });
       // Exact requirement: read number of pages of the file!
       totalPages = currentPdfDoc.getPageCount();
     } catch (pdfLibErr) {
       console.warn('PDF-Lib parser error, falling back to PDF.js engine:', pdfLibErr);
       if (window.pdfjsLib) {
         const fallbackTask = pdfjsLib.getDocument({
-          data: currentArrayBuffer.slice(0),
-          disableAutoFetch: true,
-          disableStream: true
+          data: new Uint8Array(currentArrayBuffer)
         });
         currentPdfJsDoc = await fallbackTask.promise;
         totalPages = currentPdfJsDoc.numPages;
@@ -451,9 +456,7 @@ async function handleIncomingFile(file) {
     if (window.pdfjsLib && !currentPdfJsDoc) {
       try {
         const loadingTask = pdfjsLib.getDocument({
-          data: currentArrayBuffer.slice(0),
-          disableAutoFetch: true,
-          disableStream: true
+          data: new Uint8Array(currentArrayBuffer)
         });
         currentPdfJsDoc = await loadingTask.promise;
       } catch (workerErr) {
@@ -1124,9 +1127,22 @@ function closeOcrResultModal() {
 }
 
 async function runOcrExtraction(format) {
-  if (!currentPdfJsDoc || totalPages <= 0) {
+  if (totalPages <= 0 || !currentArrayBuffer) {
     alert('Please upload a valid PDF file first.');
     return;
+  }
+
+  // Ensure PDF.js document is initialized
+  if (!currentPdfJsDoc && window.pdfjsLib && currentArrayBuffer) {
+    try {
+      showProgress('Preparing Text Extractor...', 10, 'Initializing document engine...');
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(currentArrayBuffer)
+      });
+      currentPdfJsDoc = await loadingTask.promise;
+    } catch (initErr) {
+      console.warn('PDF.js could not be initialized on demand:', initErr);
+    }
   }
 
   // 1. Determine target pages
@@ -1156,17 +1172,18 @@ async function runOcrExtraction(format) {
       const progressBase = Math.round((i / totalTasks) * 90);
       updateProgress(progressBase, `Extracting Page ${pageNum} (${i + 1} of ${totalTasks})...`);
 
-      const page = await currentPdfJsDoc.getPage(pageNum);
-
       // Attempt A: Embedded Digital Text Extraction (fast, lossless)
       let extractedText = '';
       let method = 'Digital Text';
 
-      try {
-        const textContent = await page.getTextContent();
-        extractedText = formatDigitalText(textContent);
-      } catch (textErr) {
-        console.warn(`TextContent error on page ${pageNum}:`, textErr);
+      if (currentPdfJsDoc) {
+        try {
+          const page = await currentPdfJsDoc.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          extractedText = formatDigitalText(textContent);
+        } catch (textErr) {
+          console.warn(`TextContent error on page ${pageNum}:`, textErr);
+        }
       }
 
       // Check density of extracted text
@@ -1174,38 +1191,49 @@ async function runOcrExtraction(format) {
 
       // Attempt B: If page has virtually no digital text (e.g. scanned image), invoke Tesseract OCR
       if (cleanLen < 12) {
-        method = 'OCR';
-        updateProgress(progressBase + 2, `Page ${pageNum}: Scanned image detected. Rendering high-res image for OCR...`);
+        let ocrDone = false;
 
-        // Render page to high-res canvas (scale 2.0 ensures crisp Chinese & English glyph recognition)
-        const viewport = page.getViewport({ scale: 2.0 });
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const ctx = canvas.getContext('2d');
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        if (currentPdfJsDoc) {
+          method = 'OCR';
+          updateProgress(progressBase + 2, `Page ${pageNum}: Scanned image detected. Rendering high-res image for OCR...`);
 
-        if (window.Tesseract) {
-          updateProgress(progressBase + 4, `Page ${pageNum}: Running OCR engine (${langCode})...`);
           try {
-            const ocrResult = await Tesseract.recognize(canvas, langCode, {
-              logger: m => {
-                if (m.status === 'recognizing text') {
-                  const subPct = Math.round((m.progress || 0) * 100);
-                  const displayPct = progressBase + Math.round((subPct / totalTasks) * 0.9);
-                  updateProgress(Math.min(95, displayPct), `Page ${pageNum}: Recognizing ${subPct}%...`);
+            const page = await currentPdfJsDoc.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2.0 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport }).promise;
+
+            if (window.Tesseract) {
+              updateProgress(progressBase + 4, `Page ${pageNum}: Running OCR (${langLabel})...`);
+              const ocrResult = await Tesseract.recognize(canvas, langCode, {
+                logger: m => {
+                  if (m.status === 'recognizing text') {
+                    const subPct = Math.round((m.progress || 0) * 100);
+                    const displayPct = progressBase + Math.round((subPct / totalTasks) * 0.9);
+                    updateProgress(Math.min(95, displayPct), `Page ${pageNum}: OCR Recognizing (${subPct}%)...`);
+                  }
                 }
+              });
+              if (ocrResult && ocrResult.data && ocrResult.data.text && ocrResult.data.text.trim()) {
+                extractedText = ocrResult.data.text.trim();
+                ocrDone = true;
               }
-            });
-            if (ocrResult && ocrResult.data && ocrResult.data.text) {
-              extractedText = ocrResult.data.text.trim();
             }
           } catch (tessErr) {
             console.error(`Tesseract OCR error on page ${pageNum}:`, tessErr);
-            extractedText = `[OCR error on page ${pageNum}: ${tessErr.message || tessErr}]`;
           }
-        } else {
-          extractedText = `[Page ${pageNum}: Scanned image. Tesseract OCR library not ready.]`;
+        }
+
+        // Fallback: If OCR didn't yield text and cleanLen is 0, extract raw stream strings
+        if (!ocrDone && cleanLen === 0) {
+          const streamText = extractRawTextFromBuffer(currentArrayBuffer, pageNum);
+          if (streamText) {
+            extractedText = streamText;
+            method = 'Text Stream';
+          }
         }
       }
 
@@ -1317,6 +1345,29 @@ function formatDigitalText(textContent) {
   }
 
   return outputLines.join('\n');
+}
+
+/**
+ * Fallback stream text extractor directly from binary PDF bytes
+ */
+function extractRawTextFromBuffer(arrayBuffer, pageNum) {
+  try {
+    const bytes = new Uint8Array(arrayBuffer);
+    let str = '';
+    const limit = Math.min(bytes.length, 600000);
+    for (let i = 0; i < limit; i++) {
+      if (bytes[i] >= 32 && bytes[i] <= 126) {
+        str += String.fromCharCode(bytes[i]);
+      } else if (bytes[i] === 10 || bytes[i] === 13) {
+        str += '\n';
+      }
+    }
+    const matches = str.match(/\(([^()]{2,})\)\s*(?:Tj|'|")/g);
+    if (matches && matches.length > 0) {
+      return matches.map(m => m.replace(/\)\s*(?:Tj|'|")$/, '').replace(/^\(/, '')).join(' ');
+    }
+  } catch (e) {}
+  return '';
 }
 
 /**
