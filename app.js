@@ -14,6 +14,11 @@ if (window.pdfjsLib) {
   } catch(e) {}
 }
 
+const PDFJS_CONFIG = {
+  cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/cmaps/',
+  cMapPacked: true
+};
+
 // State
 let currentFile = null;
 let currentArrayBuffer = null;
@@ -23,6 +28,7 @@ let totalPages = 0;
 let selectedPages = new Set(); // 0-based page indices
 let activeMode = 'all'; // 'all' | 'ranges' | 'chunks' | 'extract' | 'delete'
 let generatedFiles = []; // { filename, bytes, pageIndices, pageLabel }
+let isOperationCancelled = false;
 
 // DOM Elements
 const dropZone = document.getElementById('dropZone');
@@ -402,7 +408,8 @@ async function handleIncomingFile(file) {
       console.warn('PDF-Lib parser error, falling back to PDF.js engine:', pdfLibErr);
       if (window.pdfjsLib) {
         const fallbackTask = pdfjsLib.getDocument({
-          data: new Uint8Array(currentArrayBuffer)
+          data: new Uint8Array(currentArrayBuffer),
+          ...PDFJS_CONFIG
         });
         currentPdfJsDoc = await fallbackTask.promise;
         totalPages = currentPdfJsDoc.numPages;
@@ -456,7 +463,8 @@ async function handleIncomingFile(file) {
     if (window.pdfjsLib && !currentPdfJsDoc) {
       try {
         const loadingTask = pdfjsLib.getDocument({
-          data: new Uint8Array(currentArrayBuffer)
+          data: new Uint8Array(currentArrayBuffer),
+          ...PDFJS_CONFIG
         });
         currentPdfJsDoc = await loadingTask.promise;
       } catch (workerErr) {
@@ -1126,18 +1134,27 @@ function closeOcrResultModal() {
   ocrResultModal.style.display = 'none';
 }
 
+function cancelCurrentOperation() {
+  isOperationCancelled = true;
+  hideProgress();
+  alert('Operation cancelled.');
+}
+
 async function runOcrExtraction(format) {
   if (totalPages <= 0 || !currentArrayBuffer) {
     alert('Please upload a valid PDF file first.');
     return;
   }
 
-  // Ensure PDF.js document is initialized
+  isOperationCancelled = false;
+
+  // Ensure PDF.js document is initialized with CMap support for Chinese & Unicode
   if (!currentPdfJsDoc && window.pdfjsLib && currentArrayBuffer) {
     try {
-      showProgress('Preparing Text Extractor...', 10, 'Initializing document engine...');
+      showProgress('Preparing Text Extractor...', 10, 'Initializing Chinese & English CMap font engine...');
       const loadingTask = pdfjsLib.getDocument({
-        data: new Uint8Array(currentArrayBuffer)
+        data: new Uint8Array(currentArrayBuffer),
+        ...PDFJS_CONFIG
       });
       currentPdfJsDoc = await loadingTask.promise;
     } catch (initErr) {
@@ -1167,10 +1184,12 @@ async function runOcrExtraction(format) {
 
   try {
     for (let i = 0; i < totalTasks; i++) {
+      if (isOperationCancelled) break;
+
       const pageIdx = targetIndices[i];
       const pageNum = pageIdx + 1;
       const progressBase = Math.round((i / totalTasks) * 90);
-      updateProgress(progressBase, `Extracting Page ${pageNum} (${i + 1} of ${totalTasks})...`);
+      updateProgress(progressBase, `Processing Page ${pageNum} (${i + 1} of ${totalTasks})...`);
 
       // Attempt A: Embedded Digital Text Extraction (fast, lossless)
       let extractedText = '';
@@ -1179,7 +1198,7 @@ async function runOcrExtraction(format) {
       if (currentPdfJsDoc) {
         try {
           const page = await currentPdfJsDoc.getPage(pageNum);
-          const textContent = await page.getTextContent();
+          const textContent = await page.getTextContent({ normalizeWhitespace: true });
           extractedText = formatDigitalText(textContent);
         } catch (textErr) {
           console.warn(`TextContent error on page ${pageNum}:`, textErr);
@@ -1189,17 +1208,17 @@ async function runOcrExtraction(format) {
       // Check density of extracted text
       const cleanLen = extractedText.replace(/\s+/g, '').length;
 
-      // Attempt B: If page has virtually no digital text (e.g. scanned image), invoke Tesseract OCR
-      if (cleanLen < 12) {
+      // Attempt B: ONLY if page has zero digital text (scanned image), attempt OCR with safe timeout
+      if (cleanLen === 0) {
         let ocrDone = false;
 
         if (currentPdfJsDoc) {
           method = 'OCR';
-          updateProgress(progressBase + 2, `Page ${pageNum}: Scanned image detected. Rendering high-res image for OCR...`);
+          updateProgress(progressBase + 2, `Page ${pageNum}: Image page detected. Scanning canvas...`);
 
           try {
             const page = await currentPdfJsDoc.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 2.0 });
+            const viewport = page.getViewport({ scale: 1.5 });
             const canvas = document.createElement('canvas');
             canvas.width = viewport.width;
             canvas.height = viewport.height;
@@ -1208,7 +1227,9 @@ async function runOcrExtraction(format) {
 
             if (window.Tesseract) {
               updateProgress(progressBase + 4, `Page ${pageNum}: Running OCR (${langLabel})...`);
-              const ocrResult = await Tesseract.recognize(canvas, langCode, {
+
+              // Run OCR with a strict 5-second timeout so it never hangs if network blocks 40MB traineddata
+              const ocrPromise = Tesseract.recognize(canvas, langCode, {
                 logger: m => {
                   if (m.status === 'recognizing text') {
                     const subPct = Math.round((m.progress || 0) * 100);
@@ -1217,22 +1238,28 @@ async function runOcrExtraction(format) {
                   }
                 }
               });
+
+              const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(null), 5000));
+              const ocrResult = await Promise.race([ocrPromise, timeoutPromise]);
+
               if (ocrResult && ocrResult.data && ocrResult.data.text && ocrResult.data.text.trim()) {
                 extractedText = ocrResult.data.text.trim();
                 ocrDone = true;
+              } else if (!ocrResult) {
+                console.warn(`OCR timed out on page ${pageNum} due to network restriction on traineddata download.`);
               }
             }
           } catch (tessErr) {
-            console.error(`Tesseract OCR error on page ${pageNum}:`, tessErr);
+            console.warn(`Tesseract OCR error on page ${pageNum}:`, tessErr);
           }
         }
 
-        // Fallback: If OCR didn't yield text and cleanLen is 0, extract raw stream strings
+        // Fallback: If OCR timed out or was empty, attempt binary stream string extraction
         if (!ocrDone && cleanLen === 0) {
           const streamText = extractRawTextFromBuffer(currentArrayBuffer, pageNum);
           if (streamText) {
             extractedText = streamText;
-            method = 'Text Stream';
+            method = 'Stream Extract';
           }
         }
       }
@@ -1344,7 +1371,11 @@ function formatDigitalText(textContent) {
     }
   }
 
-  return outputLines.join('\n');
+  const result = outputLines.join('\n').trim();
+  if (result.length > 0) return result;
+
+  // Robust fallback: direct text join
+  return items.map(it => it.str || '').join(' ').trim();
 }
 
 /**
